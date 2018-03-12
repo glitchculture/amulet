@@ -9,11 +9,11 @@
     <link rel="stylesheet" href="matchesonscrollbar.css">
     <link rel="stylesheet" href="dialog.css">
     <link rel="stylesheet" href="editor.css">
-    <link rel="icon" type="image/png" href="favicon.png">
+  <!--  <link rel="icon" type="image/png" href="favicon.png"> -->
   </head>
   <body>
     <div id="top-panel">
-        <div class="title"><a href="http://www.amulet.xyz" target="_blank" class="title"><img src="am_text.png" alt="Amulet"></a></div>
+        <div class="title"><a href="http://www.amulet.xyz" target="_blank" class="title"></a></div>
         <div class="button"><a id="new">New</a></div>
         <div class="button"><a id="save">Save</a> <input id="savename" type="text" value="Untitled"></input></div>
         <div class="button"><select id="load"></select></div>
@@ -149,7 +149,7 @@ function load_new() {
 }
 
 function load_example(name) {
-    $.get("examples/" + name, function(code) {
+    $.get(name, function(code) {
         editor.getDoc().setValue(code);
         reset_save();
         $("#savename").val(name.replace(/\.lua$/, ""));
@@ -159,15 +159,10 @@ function load_example(name) {
 
 function load_file(name) {
     var saves = get_storage_object("saves");
-
-    if (saves[name]) {
-        editor.getDoc().setValue(saves[name]);
-        reset_save();
-        $("#savename").val(name);
-        set_storage_object("lastopen", name);
-    } else {
-        load_new();
-    }
+    editor.getDoc().setValue(saves[name]);
+    reset_save();
+    $("#savename").val(name);
+    set_storate_object("lastopen", name);
 }
 
 function ed_load_gist(id) {
@@ -205,12 +200,21 @@ function run_waiting_anim() {
 
 function init_controls() {
     $("#new").click(function() {
-        if (!editor_dirty || confirm("Discard current changes?")) {
+        if (!editor_dirty || confirm("Loose current changes?")) {
             load_new();
             run_waiting_anim();
         }
     });
-    $("#save").click(save_file);
+    $("#save").click(function() {
+        var saves = get_storage_object("saves");
+        if (!saves) saves = {};
+        var name = $("#savename").val();
+        saves[name] = editor.getDoc().getValue();
+        set_storate_object("saves", saves);
+        reset_save();
+        init_load_options();
+        set_storate_object("lastopen", name);
+    });
     $("#run").click(function() {
         run_current();
     });
@@ -265,7 +269,7 @@ function init_controls() {
     });
     $("#load").change(function() {
         var val = $(this).val();
-        if (!editor_dirty || confirm("Discard current changes?")) {
+        if (!editor_dirty || confirm("Loose current changes?")) {
             load_file(val);
             run_current();
             $("#load").val("");
@@ -273,16 +277,16 @@ function init_controls() {
     });
     $("#loadexample").change(function() {
         var val = $(this).val();
-        if (!editor_dirty || confirm("Discard current changes?")) {
+        if (!editor_dirty || confirm("Loose current changes?")) {
             load_example(val);
             $("#loadexample").val("");
         }
     });
     $("#delete").click(function() {
-        if (confirm("Deleting '" + $("#savename").val() + "', are you sure?")) {
+        if (confirm("Are you sure?")) {
             var saves = get_storage_object("saves");
             delete saves[$("#savename").val()];
-            set_storage_object("saves", saves);
+            set_storate_object("saves", saves);
             init_load_options();
             for (s in saves) {
                 console.log("loading: " + s);
@@ -302,7 +306,7 @@ function init_editor() {
             name: "lua",
         },
         matchBrackets: true,
-        theme: "amulet",
+
         lineNumbers: true,
         indentUnit: 4,
         indentWithTabs: false,
@@ -339,7 +343,7 @@ function get_storage_object(key) {
     }
 }
 
-function set_storage_object(key, obj) {
+function set_storate_object(key, obj) {
     localStorage.setItem(key, JSON.stringify(obj));
 }
 
@@ -357,7 +361,7 @@ function init_layout() {
         layout.output_panel_height = 200;
     }
     //console.log(JSON.stringify(layout));
-    set_storage_object("layout", layout);
+    set_storate_object("layout", layout);
 
     var splitter_width = $("#vsplitter").outerWidth();
     var splitter_height = $("#hsplitter").outerHeight();
@@ -378,7 +382,7 @@ function save_layout() {
         left_panel_width: $("#left-panel").outerWidth(),
         output_panel_height: $("#output-panel").outerHeight()
     };
-    set_storage_object("layout", layout);
+    set_storate_object("layout", layout);
 }
 
 function init_vsplitter() {
@@ -536,30 +540,6 @@ function setup() {
     init_vsplitter();
     init_hsplitter();
 }
-
-function save_file() {
-    var saves = get_storage_object("saves");
-    if (!saves) saves = {};
-    var name = $("#savename").val();
-    saves[name] = editor.getDoc().getValue();
-    set_storage_object("saves", saves);
-    reset_save();
-    init_load_options();
-    set_storage_object("lastopen", name);
-}
-
-window.addEventListener("keydown", function(event) {
-    var keyCode = event.keyCode;
-
-    if (keyCode === 116) {   // F5 key, runs current Lua script
-        run_current();
-    }
-
-    if (event.keyCode == 83 && (navigator.platform.match("Mac") ? event.metaKey : event.ctrlKey)) {
-        event.preventDefault();
-        save_file();
-    }
-}, true);
 
 $(setup);
     </script>
