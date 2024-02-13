@@ -19,8 +19,11 @@ SECTIONS = header.md \
 	controller.md \
 	spritepack.md \
 	export.md \
+	conf.md \
 	models.md \
 	table.md \
+	types.md \
+	random.md \
 	require.md \
 	misc.md
 
@@ -28,7 +31,7 @@ SECTIONS = header.md \
 GRAPHS = $(wildcard graphs/*.dot)
 GRAPH_PNGS = $(patsubst %.dot,%.png,$(GRAPHS))
 
-index.html: $(SECTIONS) $(GRAPH_PNGS) style.css template.html Makefile 
+index.html: $(SECTIONS) $(GRAPH_PNGS) style.css template.html Makefile
 	cat $(SECTIONS) | pandoc --mathjax --template template.html -c style.css --toc --toc-depth=4 -f markdown -o $@
 
 $(GRAPH_PNGS): %.png: %.dot

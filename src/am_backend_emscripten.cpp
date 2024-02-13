@@ -16,7 +16,7 @@ static am_key convert_key(SDL_Keycode key);
 static am_mouse_button convert_mouse_button(Uint8 button);
 static void init_mouse_state();
 static void open_package();
-static void load_package();
+static void load_package(const char *url);
 static void on_load_package_complete(unsigned int x, void *arg, const char *filename);
 static void on_load_package_error(unsigned int x, void *arg, int http_status);
 static void on_load_package_progress(unsigned int x, void *arg, int perc);
@@ -64,6 +64,9 @@ am_native_window *am_create_native_window(
         case AM_WINDOW_MODE_FULLSCREEN: flags |= SDL_FULLSCREEN; break;
         case AM_WINDOW_MODE_FULLSCREEN_DESKTOP: flags |= SDL_FULLSCREEN; break;
     }
+    EM_ASM({
+        window.amulet.highdpi = $0;
+    }, highdpi ? 1 : 0);
     if (resizable) flags |= SDL_RESIZABLE;
     if (width < 0) width = 0;
     if (height < 0) height = 0;
@@ -77,7 +80,7 @@ am_native_window *am_create_native_window(
     init_mouse_state();
     EM_ASM_INT({
         var title_el = document.getElementById("title");
-        if (title_el) title_el.innerHTML = Module.Pointer_stringify($0);
+        if (title_el) title_el.innerHTML = Module.UTF8ToString($0);
     }, title);
     return (am_native_window*)sdl_window;
 }
@@ -86,6 +89,15 @@ void am_get_native_window_size(am_native_window *window, int *pw, int *ph, int *
     SDL_GetWindowSize(NULL /* unused */, pw, ph);
     *sw = *pw;
     *sh = *ph;
+}
+
+void am_get_native_window_safe_area_margin(am_native_window *window, 
+    int *left, int *right, int *bottom, int *top)
+{
+    *left = 0;
+    *right = 0;
+    *bottom = 0;
+    *top = 0;
 }
 
 void am_destroy_native_window(am_native_window* win) {
@@ -259,7 +271,15 @@ int main( int argc, char *argv[] )
             window.amulet.ready();
         );
     } else {
-        load_package();
+        char *url = (char*)EM_ASM_INT({
+            var jsString = window.amulet_data_pak_url ? window.amulet_data_pak_url : "data.pak";
+            var lengthBytes = lengthBytesUTF8(jsString)+1; // 'jsString.length' would return the length of the string as UTF-16 units, but Emscripten C strings operate as UTF-8.
+            var stringOnWasmHeap = _malloc(lengthBytes);
+            stringToUTF8(jsString, stringOnWasmHeap, lengthBytes+1);
+            return stringOnWasmHeap;
+        });
+        load_package(url);
+        free(url);
     }
 }
 
@@ -326,6 +346,39 @@ static bool handle_events() {
                 }
                 break;
             }
+            case SDL_FINGERDOWN: {
+                am_window *win = am_find_window((am_native_window*)sdl_window);
+                win->touch_begin(
+                    eng->L,
+                    (void*)event.tfinger.fingerId,
+                    event.tfinger.x * win->screen_width,
+                    event.tfinger.y * win->screen_height,
+                    event.tfinger.pressure
+                );
+                break;
+            }
+            case SDL_FINGERMOTION: {
+                am_window *win = am_find_window((am_native_window*)sdl_window);
+                win->touch_move(
+                    eng->L,
+                    (void*)event.tfinger.fingerId,
+                    event.tfinger.x * win->screen_width,
+                    event.tfinger.y * win->screen_height,
+                    event.tfinger.pressure
+                );
+                break;
+            }
+            case SDL_FINGERUP: {
+                am_window *win = am_find_window((am_native_window*)sdl_window);
+                win->touch_end(
+                    eng->L,
+                    (void*)event.tfinger.fingerId,
+                    event.tfinger.x * win->screen_width,
+                    event.tfinger.y * win->screen_height,
+                    event.tfinger.pressure
+                );
+                break;
+            }
             case SDL_MOUSEMOTION: {
                 int lock_pointer = EM_ASM_INT({ return window.amulet.have_pointer_lock() ? 1 : 0; }, 0);
                 if (lock_pointer) {
@@ -341,6 +394,9 @@ static bool handle_events() {
                 if (event.button.which != SDL_TOUCH_MOUSEID) {
                     am_window *win = am_find_window((am_native_window*)sdl_window);
                     if (win) {
+                        // make sure we have the current mouse position
+                        mouse_x = event.motion.x;
+                        mouse_y = event.motion.y;
                         win->mouse_down(eng->L, convert_mouse_button(event.button.button));
                     }
                 }
@@ -356,6 +412,7 @@ static bool handle_events() {
                 break;
             }
             case SDL_MOUSEWHEEL: {
+                mouse_wheel_x += event.wheel.x > 0 ? 1 : event.wheel.x < 0 ? -1 : 0;
                 mouse_wheel_y += event.wheel.y > 0 ? 1 : event.wheel.y < 0 ? -1 : 0;
                 break;
             }
@@ -499,6 +556,8 @@ static am_key convert_key(SDL_Keycode key) {
         case SDLK_RCTRL: return AM_KEY_RCTRL;
         case SDLK_LSHIFT: return AM_KEY_LSHIFT;
         case SDLK_RSHIFT: return AM_KEY_RSHIFT;
+        case SDLK_LGUI: return AM_KEY_LGUI;
+        case SDLK_RGUI: return AM_KEY_RGUI;
         case SDLK_F1: return AM_KEY_F1;
         case SDLK_F2: return AM_KEY_F2;
         case SDLK_F3: return AM_KEY_F3;
@@ -548,8 +607,8 @@ static void on_load_package_progress(unsigned int x, void *arg, int perc) {
     }, perc);
 }
 
-static void load_package() {
-    emscripten_async_wget2("data.pak", "data.pak", "GET", "", NULL,
+static void load_package(const char *url) {
+    emscripten_async_wget2(url, "data.pak", "GET", "", NULL,
         &on_load_package_complete, &on_load_package_error, &on_load_package_progress); 
 }
 
@@ -624,6 +683,10 @@ const char *am_preferred_language() {
     return "en";
 }
 
+char *am_open_file_dialog() {
+    return NULL;
+}
+
 extern "C" {
 
 void am_emscripten_run(const char *script) {
@@ -662,6 +725,13 @@ void am_emscripten_resume() {
 void am_emscripten_resize(int w, int h) {
 }
 
+}
+
+lua_State *am_get_global_lua_state() {
+    if (eng != NULL) {
+        return eng->L;
+    }
+    return NULL;
 }
 
 #endif // AM_BACKEND_EMSCRIPTEN

@@ -72,7 +72,7 @@ example:
 ~~~ {.lua}
 local v = vec3(10, 20, 30)
 for i = 1, #v do
-    print(position[i])
+    print(v[i])
 end
 ~~~
 
@@ -163,6 +163,18 @@ produces the following output:
 vec2(4, 5)
 vec3(10, 3, 6)
 vec4(2, 4, 6, 8)
+~~~ 
+
+Vectors can be compared by value with `==` like this:
+
+~~~ {.lua}
+if vec2(x,y) == vec2(0,0) then ...
+~~~
+
+Also, you can concatenate vectors with strings for easy formatting:
+
+~~~ {.lua}
+local label = "position: "..vec2(x,y)
 ~~~
 
 -------------------
@@ -359,6 +371,12 @@ The `/` operator also works when both arguments are matrices and is
 equivalent to multiplying the first matrix by the inverse of the
 second.
 
+Matricies can be compared by value with `==` like this:
+
+~~~ {.lua}
+if m1*m2 == mat4(1) then ...
+~~~
+
 ![](images/screenshot2.jpg)
 
 Quaternions {#quaternions}
@@ -442,6 +460,14 @@ Quaternions use a normalized internal representation, so the value
 returned by a field might be different from the value used to
 construct the quaternion. Though the quaternion as a whole represents
 the equivalent rotation.
+
+You may notice this when comparing quaternions with `==`. For example:
+
+~~~ {.lua}
+quat(vec3(1,0,0), vec3(0,1,0)) == quat(vec3(-1,0,0), vec3(0,-1,0))
+~~~
+
+evaluates to `true`.
 
 ### Quaternion operations
 
@@ -559,13 +585,37 @@ near and far clipping plains (negative means behind the viewer).
 Their default values are `-1` and `1`.
 
 
-### math.translate4(pos) {#math.translate4 .func-def}
+### math.translate4(position) {#math.translate4 .func-def}
 
-Creates a 4x4 translation matrix. `pos` should be a `vec3`.
+Creates a 4x4 translation matrix.
 
-### math.scale4(scl) {#math.scale4 .func-def}
+`position` may be either 2 or 3 numbers (the
+x, y and z components) or a `vec2` or `vec3`. 
 
-Creates a 4x4 scale matrix. `scl` should be a `vec3`.
+If the z component is omitted it is assumed to
+be 0.
+
+### math.scale4(scaling) {#math.scale4 .func-def}
+
+Creates a 4x4 scale matrix.
+
+`scaling` may be 1, 2 or 3 numbers or a
+`vec2` or `vec3`. If 1 number is provided
+it is assume to be the x and y components
+of the scaling and the z scaling is assumed
+to be 1. If 2 numbers or a `vec2` is provided,
+they are the scaling for the x and y components
+and z is assumed to be 1.
+
+### math.rotate4(rotation) {#math.scale4 .func-def}
+
+Creates a 4x4 rotation matrix.
+
+`rotation` can be either a quaternion, or
+an angle (in radians) followed by an optional `vec3` axis.
+If the axis is omitted it is assumed to be `vec3(0, 0, 1)`
+so the rotation becomes a 2D rotation in the xy plane about
+the z axis.
 
 ### math.perlin(pos [, period]) {#math.perlin .func-def}
 
@@ -583,7 +633,7 @@ or a number.
 
 The returned value is between -1 and 1.
 
-### math.mix(from, top, t) {#math.mix .func-def}
+### math.mix(from, to, t) {#math.mix .func-def}
 
 Returns the linear interpolation between `from` and `to` determined by
 `t`. `from` and `to` can be numbers or vectors, and must be the same
@@ -591,7 +641,7 @@ type. `t` should be a number between 0 and 1. `from` and `to` can also
 be quaternions. In this case `math.mix` returns the spherical linear
 interpolation of the two quaternions.
 
-### math.slerp(from, top, t) {#math.slerp .func-def}
+### math.slerp(from, to, t) {#math.slerp .func-def}
 
 Returns the spherical linear interpolation of the two quaternions
 `from` and `to`. `t` should be a number between 0 and 1.

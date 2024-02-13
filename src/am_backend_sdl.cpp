@@ -4,19 +4,16 @@
 
 #define SDL_MAIN_HANDLED 1
 #include "SDL.h"
+#include "SDL_syswm.h"
 
 #ifdef AM_OSX
 #import <AppKit/AppKit.h>
+#import <Cocoa/Cocoa.h>
 #endif
 
 // Create variables for OpenGL ES 2 functions
 #ifdef AM_NEED_GL_FUNC_PTRS
-#if defined(AM_GLPROFILE_ES)
-#include <SDL_opengles2.h>
-#else
-#define GL_GLEXT_PROTOTYPES
 #include <SDL_opengl.h>
-#endif
 #define AM_GLPROC(ret,func,params) \
     typedef ret (APIENTRY *func##_ptr_t) params; \
     extern ret (APIENTRY *func##_ptr) params;
@@ -37,6 +34,17 @@ struct win_info {
     int mouse_wheel_y;
 };
 
+struct controller_info {
+    bool active;
+    SDL_JoystickID joyid;
+    SDL_Haptic *haptic;
+    SDL_GameController *controller;
+};
+
+#define MAX_CONTROLLERS 8
+
+static controller_info controller_infos[MAX_CONTROLLERS];
+
 static bool have_focus = true;
 static SDL_AudioDeviceID audio_device = 0;
 static SDL_AudioDeviceID capture_device = 0;
@@ -49,16 +57,31 @@ static bool capture_initialized = false;
 static bool should_init_capture = false;
 static std::vector<win_info> windows;
 SDL_Window *main_window = NULL;
-static SDL_GLContext gl_context;
-static bool gl_context_initialized = false;
 static bool sdl_initialized = false;
 static bool restart_triggered = false;
+static lua_State *global_lua_state = NULL;
+
+#ifdef AM_USE_METAL
+extern NSWindow *am_metal_window;
+extern bool am_metal_use_highdpi;
+extern bool am_metal_window_depth_buffer;
+extern bool am_metal_window_stencil_buffer;
+extern int am_metal_window_msaa_samples;
+extern int am_metal_window_pwidth;
+extern int am_metal_window_pheight;
+extern int am_metal_window_swidth;
+extern int am_metal_window_sheight;
+#else
+static SDL_GLContext gl_context;
+static bool gl_context_initialized = false;
+#endif
 
 static am_package *package = NULL;
 
 static void init_sdl();
 static void init_audio();
 static void init_audio_capture();
+static void init_controllers();
 static bool handle_events(lua_State *L);
 static am_key convert_key_scancode(SDL_Scancode key);
 static am_mouse_button convert_mouse_button(Uint8 button);
@@ -81,32 +104,34 @@ am_native_window *am_create_native_window(
     bool stencil_buffer,
     int msaa_samples)
 {
-    if (windows.size() == 0 && main_window != NULL) {
-        win_info winfo;
-        memset(&winfo, 0, sizeof(win_info));
-        winfo.window = main_window;
-        SDL_GetMouseState(&winfo.mouse_x, &winfo.mouse_y);
-        windows.push_back(winfo);
+    if (restart_triggered && main_window != NULL) {
+        // restarting, return existing window
         return (am_native_window*)main_window;
     }
     if (!sdl_initialized) {
         init_sdl();
     }
+#ifdef AM_USE_METAL
+    Uint32 flags = 0;
+    if (main_window) {
+        am_log0("%s", "sorry, only one window is supported");
+        return NULL;
+    }
+#else
+    // using gl
     if (main_window != NULL) {
         SDL_GL_MakeCurrent(main_window, gl_context);
         SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
     }
-#if defined(AM_GLPROFILE_ES)
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-#elif defined(AM_GLPROFILE_DESKTOP)
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
-#else
-#error unknown gl profile
-#endif
+    if (am_conf_d3dangle) {
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+    } else {
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+    }
     SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
@@ -128,6 +153,7 @@ am_native_window *am_create_native_window(
         SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
     }
     Uint32 flags = SDL_WINDOW_OPENGL;
+#endif
     switch (mode) {
         case AM_WINDOW_MODE_WINDOWED: break;
         case AM_WINDOW_MODE_FULLSCREEN: flags |= SDL_WINDOW_FULLSCREEN; break;
@@ -152,6 +178,16 @@ am_native_window *am_create_native_window(
         am_log0("%s", SDL_GetError());
         return NULL;
     }
+#ifdef AM_USE_METAL
+    SDL_SysWMinfo sdl_info;
+    SDL_VERSION(&sdl_info.version);
+    SDL_GetWindowWMInfo(win, &sdl_info);
+    am_metal_window = sdl_info.info.cocoa.window;
+    am_metal_use_highdpi = highdpi;
+    am_metal_window_depth_buffer = depth_buffer;
+    am_metal_window_stencil_buffer = stencil_buffer;
+    am_metal_window_msaa_samples = msaa_samples;
+#else
     if (!gl_context_initialized) {
         gl_context = SDL_GL_CreateContext(win);
 #ifdef AM_NEED_GL_FUNC_PTRS
@@ -160,6 +196,7 @@ am_native_window *am_create_native_window(
         gl_context_initialized = true;
     }
     SDL_GL_MakeCurrent(win, gl_context);
+#endif
     if (!am_gl_is_initialized()) {
         am_init_gl();
     }
@@ -184,13 +221,29 @@ void am_get_native_window_size(am_native_window *window, int *pw, int *ph, int *
     *ph = 0;
     *sw = 0;
     *sh = 0;
+#ifdef AM_USE_METAL
+    *pw = am_metal_window_pwidth;
+    *ph = am_metal_window_pheight;
+    *sw = am_metal_window_swidth;
+    *sh = am_metal_window_sheight;
+#else
     for (unsigned int i = 0; i < windows.size(); i++) {
         if (windows[i].window == (SDL_Window*)window) {
-            SDL_GL_GetDrawableSize(windows[i].window, pw, ph);
             SDL_GetWindowSize(windows[i].window, sw, sh);
+            SDL_GL_GetDrawableSize(windows[i].window, pw, ph);
             return;
         }
     }
+#endif
+}
+
+void am_get_native_window_safe_area_margin(am_native_window *window, 
+    int *left, int *right, int *bottom, int *top)
+{
+    *left = 0;
+    *right = 0;
+    *bottom = 0;
+    *top = 0;
 }
 
 bool am_set_native_window_size_and_mode(am_native_window *window, int w, int h, am_window_mode mode) {
@@ -298,12 +351,17 @@ void am_destroy_native_window(am_native_window* window) {
 }
 
 void am_native_window_bind_framebuffer(am_native_window* window) {
+#if !defined(AM_USE_METAL)
     SDL_GL_MakeCurrent((SDL_Window*)window, gl_context);
+#endif
     am_bind_framebuffer(0);
 }
 
 void am_native_window_swap_buffers(am_native_window* window) {
+    am_gl_end_frame(true);
+#if !defined(AM_USE_METAL)
     SDL_GL_SwapWindow((SDL_Window*)window);
+#endif
 }
 
 double am_get_current_time() {
@@ -345,18 +403,24 @@ static void *am_read_resource_package(const char *filename, int *len, char **err
 static void *am_read_resource_file(const char *filename, int *len, char **errmsg) {
     *errmsg = NULL;
     char tmpbuf[ERR_MSG_SZ];
-    char *path = (char*)malloc(strlen(am_opt_data_dir) + 1 + strlen(filename) + 1);
-    sprintf(path, "%s%c%s", am_opt_data_dir, AM_PATH_SEP, filename);
+    char *path;
+    bool force_filesystem = filename[0] == '@';
+    if (force_filesystem) {
+        path = (char*)(filename + 1);
+    } else {
+        path = (char*)malloc(strlen(am_opt_data_dir) + 1 + strlen(filename) + 1);
+        sprintf(path, "%s%c%s", am_opt_data_dir, AM_PATH_SEP, filename);
+    }
     SDL_RWops *f = NULL;
     f = SDL_RWFromFile(path, "r");
     if (f == NULL) {
         snprintf(tmpbuf, ERR_MSG_SZ, "unable to read file %s", path);
-        free(path);
+        if (!force_filesystem) free(path);
         *errmsg = (char*)malloc(strlen(tmpbuf) + 1);
         strcpy(*errmsg, tmpbuf);
         return NULL;
     }
-    free(path);
+    if (!force_filesystem) free(path);
     Sint64 sz = (size_t)SDL_RWsize(f);
     size_t capacity = 1024;
     if (sz > 0) {
@@ -383,14 +447,15 @@ static void *am_read_resource_file(const char *filename, int *len, char **errmsg
 }
 
 void *am_read_resource(const char *filename, int *len, char **errmsg) {
-    if (package != NULL) {
+    bool force_filesystem = filename[0] == '@';
+    if (!force_filesystem && package != NULL) {
         return am_read_resource_package(filename, len, errmsg);
     } else {
         return am_read_resource_file(filename, len, errmsg);
     }
 }
 
-#if !defined (AM_OSX) // see am_videocapture_osx.cpp for OSX definition
+#if !(defined (AM_OSX) && !defined(AM_USE_METAL))// see am_videocapture_osx.cpp for OSX (opengl) definition
 int am_next_video_capture_frame() {
     return 0;
 }
@@ -398,13 +463,76 @@ void am_copy_video_frame_to_texture() {
 }
 #endif
 
+#if defined(AM_WINDOWS) && !defined(AM_MINGW) 
+
+static char *from_wstr(const wchar_t *str) {
+    int len8 = WideCharToMultiByte(CP_UTF8, 0, str, -1, NULL, 0, NULL, NULL);
+    char *str8 = (char*)malloc(len8);
+    WideCharToMultiByte(CP_UTF8, 0, str, -1, str8, len8, NULL, NULL);
+    return str8;
+}
+
+char *am_open_file_dialog() {
+    OPENFILENAME ofn;
+    const int maxlen = 1000;
+    wchar_t str[maxlen];
+    for (int i = 0; i < maxlen; i++) {
+        str[i] = 0;
+    }
+
+    ZeroMemory(&ofn, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = NULL;
+    ofn.lpstrFile = str;
+    ofn.lpstrFile[0] = 0;
+    ofn.nMaxFile = maxlen;
+    ofn.lpstrFilter = NULL;
+    ofn.lpstrCustomFilter = NULL;
+    ofn.nFilterIndex = 0;
+    ofn.lpstrFileTitle = NULL;
+    ofn.nMaxFileTitle = 0;
+    ofn.lpstrInitialDir = NULL;
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+
+    char* result = NULL;
+
+    if (GetOpenFileName(&ofn)==TRUE) {
+        result = from_wstr(str);
+    }
+    return result;
+}
+#else
+char *am_open_file_dialog() {
+    return NULL;
+}
+#endif
+
 const char *am_preferred_language() {
 #if defined(AM_STEAMWORKS)
     return am_get_steam_lang();
+#elif defined(AM_OSX)
+    NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
+    bool in_osx_bundle = (bundleIdentifier != nil);
+    if (in_osx_bundle) {
+        NSString *languageID = [[NSBundle mainBundle] preferredLocalizations].firstObject;
+        return [languageID UTF8String];
+    } else {
+        return "en";
+    }
 #else
     return "en";
 #endif
 }
+
+#if defined (AM_OSX)
+static int launch_url(lua_State *L) {
+    am_check_nargs(L, 1);
+    const char *url = lua_tostring(L, 1);
+    if (url == NULL) return 0;
+    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:[NSString stringWithUTF8String:url]]];
+    return 0;
+}
+#endif
 
 int main( int argc, char *argv[] )
 {
@@ -420,9 +548,6 @@ int main( int argc, char *argv[] )
 
     int exit_status = EXIT_SUCCESS;
 
-#ifdef AM_OSX
-    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-#endif
 #ifdef AM_WINDOWS
     SDL_SetMainReady();
 #endif
@@ -430,6 +555,10 @@ int main( int argc, char *argv[] )
     am_expand_args(&argc, &argv);
     int expanded_argc = argc;
     char **expanded_argv = argv;
+
+#ifdef AM_OSX
+    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+#endif
 
     if (!am_process_args(&argc, &argv, &exit_status)) {
         goto quit;
@@ -443,24 +572,41 @@ int main( int argc, char *argv[] )
         exit_status = EXIT_FAILURE;
         goto quit;
     }
+
+restart:
     eng = am_init_engine(false, argc, argv);
     if (eng == NULL) {
         exit_status = EXIT_FAILURE;
         goto quit;
     }
 
-restart:
     L = eng->L;
+    global_lua_state = L;
 
     frame_time = am_get_current_time();
 
     lua_pushcclosure(L, am_require, 0);
     lua_pushstring(L, am_opt_main_module);
     if (!am_call(L, 1, 0)) {
-        exit_status = EXIT_FAILURE;
-        goto quit;
+        if (windows.size() == 0) {
+            exit_status = EXIT_FAILURE;
+        }
     }
     if (windows.size() == 0) goto quit;
+
+    if (restart_triggered) {
+        // re "attach" the controllers on the lua side after reloading the
+        // world.
+        for (int index = 0; index < MAX_CONTROLLERS; ++index) {
+            if (controller_infos[index].active) {
+                lua_pushinteger(L, index);
+                lua_pushinteger(L, controller_infos[index].joyid);
+                am_call_amulet(L, "_controller_attached", 2, 0);
+            }
+        }
+    }
+
+    restart_triggered = false;
 
     t0 = am_get_current_time();
     frame_time = t0;
@@ -468,15 +614,23 @@ restart:
     vsync = -2;
 
     while (windows.size() > 0 && !restart_triggered) {
+#if !defined(AM_USE_METAL)
         if (vsync != (am_conf_vsync ? 1 : 0)) {
             vsync = (am_conf_vsync ? 1 : 0);
             SDL_GL_SetSwapInterval(vsync);
         }
+#endif
 
         if (!am_update_windows(L)) {
             goto quit;
         }
 
+#ifdef AM_OSX
+        // release pool after updating windows, so that some metal objects, such as the layer,
+        // persist for the entire frame.
+        [pool release];
+        pool = [[NSAutoreleasePool alloc] init];
+#endif
         SDL_LockAudioDevice(audio_device);
         am_sync_audio_graph(L);
         if (should_init_capture) {
@@ -498,15 +652,18 @@ restart:
         t_debt += delta_time;
 
 #ifdef AM_STEAMWORKS
-    am_steam_step();
+        am_steam_step();
 #endif
         if (am_conf_fixed_delta_time > 0.0) {
             while (t_debt > 0.0) {
                 double t0 = am_get_current_time();
-                if (!am_execute_actions(L, am_conf_fixed_delta_time)) {
-                    exit_status = EXIT_FAILURE;
-                    goto quit;
+#ifdef AM_STEAMWORKS
+                if (!am_steam_overlay_enabled) {
+#endif
+                am_execute_actions(L, am_conf_fixed_delta_time);
+#ifdef AM_STEAMWORKS
                 }
+#endif
                 double t = am_get_current_time() - t0;
                 t_debt -= am_max(t, am_conf_fixed_delta_time);
             }
@@ -515,10 +672,13 @@ restart:
                 if (am_conf_delta_time_step > 0.0) {
                     t_debt = floor(t_debt / am_conf_delta_time_step + 0.5) * am_conf_delta_time_step;
                 }
-                if (!am_execute_actions(L, t_debt)) {
-                    exit_status = EXIT_FAILURE;
-                    goto quit;
+#ifdef AM_STEAMWORKS
+                if (!am_steam_overlay_enabled) {
+#endif
+                am_execute_actions(L, t_debt);
+#ifdef AM_STEAMWORKS
                 }
+#endif
                 t_debt = 0.0;
             }
         }
@@ -526,17 +686,19 @@ restart:
         t0 = frame_time;
 
         if (!have_focus) {
-            // throttle framerate when in background on osx
-#ifdef AM_OSX
-            usleep(10 * 1000); // 10 milliseconds
+#if defined(AM_OSX)
+            // throttle framerate when in background on osx, otherwise cpu usage becomes very high for unknown reasons
+            usleep(50 * 1000); // 50 milliseconds
 #endif
         }
     }
 
     if (restart_triggered) {
-        restart_triggered = false;
+        SDL_LockAudioDevice(audio_device);
         am_destroy_engine(eng);
-        eng = am_init_engine(false, argc, argv);
+        global_lua_state = NULL;
+        L = NULL;
+        SDL_UnlockAudioDevice(audio_device);
         goto restart;
     }
 
@@ -591,11 +753,11 @@ quit:
     }
     am_log_gl("// free expanded args");
     am_free_expanded_args(expanded_argc, expanded_argv);
+    am_log_gl("// exit");
+    am_close_gllog();
 #ifdef AM_OSX
     [pool release];
 #endif
-    am_log_gl("// exit");
-    am_close_gllog();
     exit(exit_status);
     return exit_status;
 }
@@ -712,15 +874,21 @@ WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR szCmdLine, int sw)
 }
 #endif
 
+static void add_extra_controller_mappings() {
+    SDL_GameControllerAddMapping("03000000c0160000e105000000040000,Xinmoteck 1 Player,a:b1,b:b2,y:b3,x:b0,start:b9,guide:b12,back:b8,leftx:a0,lefty:a1,rightx:a2,righty:a3,leftshoulder:b4,rightshoulder:b5,lefttrigger:b6,righttrigger:b7");
+}
+
 static void init_sdl() {
-    SDL_Init(SDL_INIT_TIMER | SDL_INIT_AUDIO | SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER);
+    add_extra_controller_mappings();
+    SDL_Init(SDL_INIT_TIMER | SDL_INIT_AUDIO | SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_HAPTIC | SDL_INIT_GAMECONTROLLER);
     init_audio();
+    init_controllers();
     sdl_initialized = true;
-#if defined(AM_WINDOWS) && defined(AM_GLPROFILE_ES)
-    if (!SDL_SetHint(SDL_HINT_VIDEO_WIN_D3DCOMPILER, "d3dcompiler_47.dll")) {
-        am_abort("unable to set SDL_HINT_VIDEO_WIN_D3DCOMPILER");
+    if (am_conf_d3dangle) {
+        if (!SDL_SetHint(SDL_HINT_VIDEO_WIN_D3DCOMPILER, "d3dcompiler_47.dll")) {
+            am_abort("unable to set SDL_HINT_VIDEO_WIN_D3DCOMPILER");
+        }
     }
-#endif
 }
 
 #ifdef AM_NEED_GL_FUNC_PTRS
@@ -857,6 +1025,14 @@ static void init_audio_capture() {
     SDL_PauseAudioDevice(capture_device, 0);
 }
 
+static void init_controllers() {
+    for (int i = 0; i < MAX_CONTROLLERS; ++i) {
+        controller_infos[i].active = false;
+        controller_infos[i].joyid = 0;
+        controller_infos[i].haptic = NULL;
+    }
+}
+
 static void update_window_mouse_state(lua_State *L, win_info *info) {
 #ifdef AM_LINUX
     // there seems to be a bug on linux where xrel and yrel are always
@@ -935,8 +1111,10 @@ static bool handle_events(lua_State *L) {
             }
             case SDL_KEYUP: {
                 if (!event.key.repeat) {
-                    if (am_conf_allow_restart && event.key.keysym.scancode == SDL_SCANCODE_F5) {
+                    if (!package && event.key.keysym.scancode == SDL_SCANCODE_F5) {
                         restart_triggered = true;
+                    } else if (!package && event.key.keysym.scancode == SDL_SCANCODE_F6) {
+                        am_call_amulet(L, "toggle_perf_overlay", 0, 0);
                     } else {
                         win_info *info = win_from_id(event.key.windowID);
                         if (info) {
@@ -967,22 +1145,30 @@ static bool handle_events(lua_State *L) {
                 break;
             }
             case SDL_MOUSEBUTTONDOWN: {
-                if (event.button.which != SDL_TOUCH_MOUSEID) {
-                    win_info *info = win_from_id(event.button.windowID);
-                    if (info) {
-                        am_find_window((am_native_window*)info->window)
-                            ->mouse_down(L, convert_mouse_button(event.button.button));
+                win_info *info = win_from_id(event.button.windowID);
+                if (info) {
+                    Uint8 button;
+                    if (event.button.which == SDL_TOUCH_MOUSEID) {
+                        button = SDL_BUTTON_LEFT;
+                    } else {
+                        button = event.button.button;
                     }
+                    am_find_window((am_native_window*)info->window)
+                        ->mouse_down(L, convert_mouse_button(button));
                 }
                 break;
             }
             case SDL_MOUSEBUTTONUP: {
-                if (event.button.which != SDL_TOUCH_MOUSEID) {
-                    win_info *info = win_from_id(event.button.windowID);
-                    if (info) {
-                        am_find_window((am_native_window*)info->window)
-                            ->mouse_up(L, convert_mouse_button(event.button.button));
+                win_info *info = win_from_id(event.button.windowID);
+                if (info) {
+                    Uint8 button;
+                    if (event.button.which == SDL_TOUCH_MOUSEID) {
+                        button = SDL_BUTTON_LEFT;
+                    } else {
+                        button = event.button.button;
                     }
+                    am_find_window((am_native_window*)info->window)
+                        ->mouse_up(L, convert_mouse_button(button));
                 }
                 break;
             }
@@ -996,11 +1182,21 @@ static bool handle_events(lua_State *L) {
             }
             case SDL_CONTROLLERDEVICEADDED: {
                 int index = event.cdevice.which;
-                SDL_GameController *controller = SDL_GameControllerOpen(index);
-                if (controller) {
-                    int joyid = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller));
-                    lua_pushinteger(L, joyid);
-                    am_call_amulet(L, "_controller_attached", 1, 0);
+                if (index < MAX_CONTROLLERS) {
+                    SDL_GameController *controller = SDL_GameControllerOpen(index);
+                    if (controller) {
+                        int joyid = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller));
+                        controller_infos[index].active = true;
+                        controller_infos[index].joyid = joyid;
+                        controller_infos[index].controller = controller;
+                        SDL_Joystick *joy = SDL_JoystickFromInstanceID(joyid);
+                        if (joy != NULL) {
+                            controller_infos[index].haptic = SDL_HapticOpenFromJoystick(joy);
+                        }
+                        lua_pushinteger(L, index);
+                        lua_pushinteger(L, joyid);
+                        am_call_amulet(L, "_controller_attached", 2, 0);
+                    }
                 }
                 break;
             }
@@ -1008,6 +1204,19 @@ static bool handle_events(lua_State *L) {
                 int joyid = event.cdevice.which;
                 lua_pushinteger(L, joyid);
                 am_call_amulet(L, "_controller_detached", 1, 0);
+                for (int i = 0; i < MAX_CONTROLLERS; ++i) {
+                    if (controller_infos[i].active && controller_infos[i].joyid == joyid) {
+                        controller_infos[i].active = false;
+                        controller_infos[i].joyid = 0;
+                        if (controller_infos[i].haptic != NULL) {
+                            SDL_HapticClose(controller_infos[i].haptic);
+                            controller_infos[i].haptic = NULL;
+                        }
+                        SDL_GameControllerClose(controller_infos[i].controller);
+                        controller_infos[i].controller = NULL;
+                        break;
+                    }
+                }
                 break;
             }
             case SDL_CONTROLLERBUTTONDOWN: {
@@ -1036,6 +1245,41 @@ static bool handle_events(lua_State *L) {
                 am_call_amulet(L, "_controller_axis_motion", 3, 0);
                 break;
             }
+            /*
+            case SDL_JOYDEVICEADDED: {
+                int joy_index = event.jdevice.which;
+                SDL_JoystickGUID guid = SDL_JoystickGetDeviceGUID(joy_index);
+                char name[100];
+                SDL_JoystickGetGUIDString(guid, name, 100);
+                am_debug("joy added '%s'", name);
+                SDL_JoystickOpen(joy_index);
+                break;
+            }
+            case SDL_JOYDEVICEREMOVED: {
+                am_debug("%s", "joy removed");
+                break;
+            }
+            case SDL_JOYBUTTONDOWN: {
+                am_debug("joy button down %d", event.jbutton.button);
+                break;
+            }
+            case SDL_JOYBUTTONUP: {
+                am_debug("%s", "joy button up");
+                break;
+            }
+            case SDL_JOYAXISMOTION: {
+                am_debug("joy axis %d %d", event.jaxis.axis, event.jaxis.value);
+                break;
+            }
+            case SDL_JOYBALLMOTION: {
+                am_debug("%s", "joy ball");
+                break;
+            }
+            case SDL_JOYHATMOTION: {
+                am_debug("%s", "joy hat");
+                break;
+            }
+            */
         }
     }
     for (unsigned i = 0; i < windows.size(); i++) {
@@ -1198,6 +1442,23 @@ static am_controller_axis convert_controller_axis(Uint8 axis) {
     return AM_CONTROLLER_AXIS_UNKNOWN;
 }
 
+static int rumble(lua_State *L) {
+    am_check_nargs(L, 3);
+    int joyid = lua_tointeger(L, 1);
+    double duration = lua_tonumber(L, 2);
+    double strength = lua_tonumber(L, 3);
+    SDL_Haptic *haptic = NULL;
+    for (int i = 0; i < MAX_CONTROLLERS; ++i) {
+        if (controller_infos[i].active && controller_infos[i].joyid == joyid) {
+            haptic = controller_infos[i].haptic;
+        }
+    }
+    if (haptic == NULL) return 0;
+    if (SDL_HapticRumbleInit(haptic) != 0) return 0;
+    SDL_HapticRumblePlay(haptic, strength, (int)(duration * 1000.0));
+    return 0;
+}
+
 static bool check_for_package() {
     if (am_opt_main_module != NULL) {
         return true;
@@ -1236,6 +1497,21 @@ static win_info *win_from_id(Uint32 winid) {
         return &windows[0];
     }
     return NULL;
+}
+
+lua_State *am_get_global_lua_state() {
+    return global_lua_state;
+}
+
+void am_open_sdl_module(lua_State *L) {
+    luaL_Reg funcs[] = {
+        {"_rumble", rumble},
+#if defined(AM_OSX)
+        {"launch_url", launch_url},
+#endif
+        {NULL, NULL}
+    };
+    am_open_module(L, AMULET_LUA_MODULE_NAME, funcs);
 }
 
 #endif // AM_BACKEND_SDL

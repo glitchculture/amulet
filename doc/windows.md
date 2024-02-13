@@ -15,18 +15,28 @@ table with any of the following fields:
     On these platforms this setting is ignored.
 
 - **`width`** and **`height`**:
-    The desired size of the window. This is not necessarily the size
-    of the window in pixels (although it usually is if the window
-    is created in `"windowed"` mode). Instead it defines the size of the window's
-    *default coordinate system*. If letterboxing is enabled then this
-    is (`-width/2`, `-height/2`) in the bottom-left corner and
-    (`width/2`, `height/2`) in the top-right corner.
-    If letterboxing is disabled, then the
-    coordinate system will extend in the horizontal or vertical
-    directions to ensure an area of at least `width`×`height` is
-    visible in the center of the window. In either case the centre
-    coordinate will always be (0, 0).
-    The default size is 640×480.
+    These define the window's *default coordinate system*.
+    If letterboxing is enabled then this is (`-width/2`, `-height/2`) in the
+    bottom-left corner and (`width/2`, `height/2`) in the top-right corner.
+    If letterboxing is disabled, then the coordinate system will extend in the
+    horizontal or vertical directions to ensure an area of at least
+    `width`×`height` is visible in the center of the window. In either case the
+    centre coordinate will always be (0, 0).  The default size is 640×480.
+    Mouse and touch positions as well as rendering will be in this coordinate
+    system unless a custom projection matrix is defined (see below).
+    These also define the physical size of the window in windowed mode, unless the
+    `physical_size` property is given (see below).
+
+- **`physical_size`**:
+    The initial physical size of the window in windowed mode (a `vec2`). 
+    This is in "screen units" which usually correspond to pixels, but not
+    always. For example on a retina Mac display where `highdpi` is enabled 
+    there are 2 pixels per screen unit. If this property is omitted then
+    the `width` and `height` properties will be used for the physical window
+    size. Note that this property has no effect on the coordinate system
+    used by the window. Note also that this property only has an effect where
+    the platform supports different sized windows. E.g. on iOS windows always
+    fill the screen, so this property is ignored.
 
 - **`title`**:
     The window title.
@@ -50,6 +60,10 @@ table with any of the following fields:
 - **`stencil_buffer`**:
     Whether the window has a stencil buffer (`true` or `false`,
     default `false`).
+
+- **`stencil_clear_value`**:
+    The value to clear the stencil buffer with before drawing each
+    frame (an integer between 0 and 255). The default is 0.
 
 - **`lock_pointer`**:
     `true` or `false`. When pointer lock is enabled the cursor will be
@@ -76,14 +90,9 @@ table with any of the following fields:
     The number of samples to use for multisample anti-aliasing. This
     must be a power of 2. Use zero (the default) for no anti-aliasing.
 
-- **`orientation`**:
-    `"portrait"` or `"landscape"`. This specifies the supported
-    orientation of the window on platforms that support orientation
-    changes (e.g. iOS). If omitted, both orientations are supported.
-
 - **`projection`**:
     A custom projection matrix (a `mat4`) to be used for the window's
-    coordinate system. This matrix is used when transforming
+    coordinate system. If supplied, this matrix is used when transforming
     mouse or touch event coordinates and is set as the projection
     matrix for rendering, but does not affect the `left`, `right`,
     `top`, `bottom`, `width` and `height` fields of the window.
@@ -150,6 +159,46 @@ The real height of the window in pixels
 
 Readonly.
 
+### window.safe_left {.func-def}
+
+The x coordinate of the left edge of the 
+window's safe area in the window's default coordinate system.
+
+This should be used to position elements that you don't want obscured
+by e.g. the iPhone X notch.
+
+Readonly.
+
+### window.safe_right {.func-def}
+
+The x coordinate of the right edge of the window's safe area, in the window's
+default coordinate system.
+
+This should be used to position elements that you don't want obscured
+by e.g. the iPhone X notch.
+
+Readonly.
+
+### window.safe_bottom {.func-def}
+
+The y coordinate of the bottom edge of the window's safe area, in the window's
+default coordinate system.
+
+This should be used to position elements that you don't want obscured
+by e.g. the iPhone X notch.
+
+Readonly.
+
+### window.safe_top {.func-def}
+
+The y coordinate of the top edge of the window's safe area, in the window's
+default coordinate system.
+
+This should be used to position elements that you don't want obscured
+by e.g. the iPhone X notch.
+
+Readonly.
+
 ### window.mode {.field-def}
 
 See [window settings](#am.window).
@@ -157,6 +206,12 @@ See [window settings](#am.window).
 Updatable.
 
 ### window.clear_color {.field-def}
+
+See [window settings](#am.window).
+
+Updatable.
+
+### window.stencil_clear_value {.field-def}
 
 See [window settings](#am.window).
 
@@ -343,7 +398,7 @@ for the same key.
 (If necessary, Amulet will postpone key release events to the
 next frame to ensure this.)
 
-### window:keys_pressed(key) {.method-def}
+### window:keys_pressed() {.method-def}
 
 Returns an array of all the keys whose state changed from
 up to down since the last frame.
@@ -359,7 +414,7 @@ returns `true` for a particular key then `key_pressed` will return `false`.
 (If necessary, Amulet will postpone key press events to the
 next frame to ensure this.)
 
-### window:keys_released(key) {.method-def}
+### window:keys_released() {.method-def}
 
 Returns an array of all the keys whose state changed from
 down to up since the last frame.

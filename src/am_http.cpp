@@ -27,13 +27,13 @@ static int http_request(lua_State *L) {
         if (!window.amulet.http_reqs) window.amulet.http_reqs = {};
         var xhr = new XMLHttpRequest();
         window.amulet.http_reqs[$0] = xhr;
-        var url = Pointer_stringify($1);
+        var url = UTF8ToString($1);
         var data = null;
         if ($2 == 0) {
             xhr.open('GET', url, true);
             xhr.send();
         } else {
-            data = Pointer_stringify($2);
+            data = UTF8ToString($2);
             xhr.open('POST', url, true);
             xhr.send(data);
         }
@@ -97,8 +97,9 @@ static void get_response(lua_State *L, void *obj) {
         var xhr = window.amulet.http_reqs[$0];
         var txt = xhr.responseText;
         if (txt == null) return 0;
-        var buffer = Module._malloc(txt.length+1);
-        Module.writeStringToMemory(txt, buffer);
+        var len = Module.lengthBytesUTF8(txt) + 1;
+        var buffer = Module._malloc(len);
+        Module.stringToUTF8(txt, buffer, len);
         return buffer;
     }, req->id);
     if (text_ptr == 0) {

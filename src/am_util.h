@@ -55,6 +55,11 @@ static inline T am_clamp(T x, T lo, T hi) {
     return x < lo ? lo : (x > hi ? hi : x);
 }
 
+template<typename T>
+static inline T am_sign(T x) {
+    return x > 0 ? 1 : (x < 0 ? -1 : 0);
+}
+
 // returned string should be freed with free()
 char *am_format(const char *fmt, ...);
 
@@ -62,15 +67,29 @@ bool am_file_exists(const char *filename);
 
 void am_replchr(char *str, char c0, char c);
 
+// replacements is a NULL-terminated list of replacement pairs
+// e.g. {"replace this", "with this", "and replace this", "with this", NULL}
+// the returned string should be freed by the caller with free
+char *am_replace_strings(char *source, char** replacements);
+
 void am_delete_file(const char *file);
 void am_make_dir(const char* dir);
 void am_delete_empty_dir(const char* dir);
 
+extern "C" {
+FILE *am_fopen(const char *path, const char *mode);
+}
+
 void *am_read_file(const char *filename, size_t *len);
+
+bool am_write_text_file(const char *filename, char *content);
+bool am_write_bin_file(const char *filename, void *content, size_t len);
 
 #ifdef AM_HAVE_GLOB
 void am_expand_args(int *argc_ptr, char ***argv_ptr);
 void am_free_expanded_args(int argc, char **argv);
 #endif
+
+bool am_execute_shell_cmd(const char *fmt, ...);
 
 #define am_always_assert(c) {if (!(c)) {am_abort("%s:%d: assertion failed: %s\n", __FILE__, __LINE__, #c);}}

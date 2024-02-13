@@ -89,6 +89,7 @@ var LibrarySDL = {
     
     keyCodes: { // DOM code ==> SDL code. See https://developer.mozilla.org/en/Document_Object_Model_%28DOM%29/KeyboardEvent and SDL_keycode.h
       // For keys that don't have unicode value, we map DOM codes with the corresponding scan codes + 1024 (using "| 1 << 10")
+      // See also: https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/keyCode
       16: 225 | 1<<10, // shift
       17: 224 | 1<<10, // control (right, or left)
       18: 226 | 1<<10, // alt
@@ -106,8 +107,8 @@ var LibrarySDL = {
       45: 73 | 1<<10, // insert
       46: 127, // SDLK_DEL == '\177'
       
-      91: 227 | 1<<10, // windows key or super key on linux (doesn't work on Mac)
-      93: 101 | 1<<10, // application
+      91: 227 | 1<<10, // windows key or super key on linux or left command on Mac
+      93: 231 | 1<<10, // application or right command on Mac
       
       96: 98 | 1<<10, // keypad 0
       97: 89 | 1<<10, // keypad 1
@@ -173,7 +174,10 @@ var LibrarySDL = {
       182: 129, // audio volume down
       183: 128, // audio volume up
       
+      186: 59, // semicolon
+      187: 61, // equals
       188: 44, // comma
+      189: 45, // minus
       190: 46, // period
       191: 47, // slash (/)
       192: 96, // backtick/backquote (`)
@@ -181,6 +185,7 @@ var LibrarySDL = {
       220: 92, // back slash
       221: 93, // close square bracket
       222: 39, // quote
+      224: 227 | 1<<10, // meta/command key
     },
 
     scanCodes: { // SDL keycode ==> SDL scancode. See SDL_scancode.h
@@ -773,7 +778,7 @@ var LibrarySDL = {
       var sdlEventPtr = allocate({{{ C_STRUCTS.SDL_KeyboardEvent.__size__ }}}, "i8", ALLOC_STACK);
 
       while (SDL.pollEvent(sdlEventPtr)) {
-        Runtime.dynCall('iii', SDL.eventHandler, [SDL.eventHandlerContext, sdlEventPtr]);
+        dynCall('iii', SDL.eventHandler, [SDL.eventHandlerContext, sdlEventPtr]);
       }
     },
 
@@ -1751,7 +1756,7 @@ var LibrarySDL = {
           if (secsUntilNextPlayStart >= SDL.audio.bufferingDelay + SDL.audio.bufferDurationSecs*SDL.audio.numSimultaneouslyQueuedBuffers) return;
 
           // Ask SDL audio data from the user code.
-          Runtime.dynCall('viii', SDL.audio.callback, [SDL.audio.userdata, SDL.audio.buffer, SDL.audio.bufferSize]);
+          dynCall('viii', SDL.audio.callback, [SDL.audio.userdata, SDL.audio.buffer, SDL.audio.bufferSize]);
           // And queue it to be played after the currently playing audio stream.
           SDL.audio.pushAudio(SDL.audio.buffer, SDL.audio.bufferSize);
         }
@@ -2238,7 +2243,7 @@ var LibrarySDL = {
     }
     SDL.music.audio = null;
     if (SDL.hookMusicFinished) {
-      Runtime.dynCall('v', SDL.hookMusicFinished);
+      dynCall('v', SDL.hookMusicFinished);
     }
     return 0;
   },
@@ -2324,7 +2329,7 @@ var LibrarySDL = {
   },
 
   TTF_OpenFont: function(filename, size) {
-    filename = FS.standardizePath(Pointer_stringify(filename));
+    filename = FS.standardizePath(UTF8ToString(filename));
     var id = SDL.fonts.length;
     SDL.fonts.push({
       name: filename, // but we don't actually do anything with it..
@@ -2339,7 +2344,7 @@ var LibrarySDL = {
 
   TTF_RenderText_Solid: function(font, text, color) {
     // XXX the font and color are ignored
-    text = Pointer_stringify(text) || ' '; // if given an empty string, still return a valid surface
+    text = UTF8ToString(text) || ' '; // if given an empty string, still return a valid surface
     var fontData = SDL.fonts[font];
     var w = SDL.estimateTextWidth(fontData, text);
     var h = fontData.size;
@@ -2362,7 +2367,7 @@ var LibrarySDL = {
   TTF_SizeText: function(font, text, w, h) {
     var fontData = SDL.fonts[font];
     if (w) {
-      {{{ makeSetValue('w', '0', 'SDL.estimateTextWidth(fontData, Pointer_stringify(text))', 'i32') }}};
+      {{{ makeSetValue('w', '0', 'SDL.estimateTextWidth(fontData, UTF8ToString(text))', 'i32') }}};
     }
     if (h) {
       {{{ makeSetValue('h', '0', 'fontData.size', 'i32') }}};
@@ -2573,18 +2578,29 @@ var LibrarySDL = {
   },
 
   SDL_SetWindowTitle: function(window, title) {
-    if (title) document.title = Pointer_stringify(title);
+    if (title) document.title = UTF8ToString(title);
   },
 
-  SDL_GetWindowSize: function(window, width, height){
+  SDL_GetWindowSize: function(sdl_window, width, height){
+    // Note: this function ignores the sdl_window argument
+    // which is intentionally named to avoid shadowing the
+    // global window variable, which is used below.
     var canvas = Module['canvas'];
     var w = canvas.width;
     var h = canvas.height;
+    var devicePixelRatio = 1;
+    // Did am.window ask for highdpi?
+    if (window.amulet.highdpi) {
+      // Does the browser & screen support it?
+      devicePixelRatio = window.devicePixelRatio || 1;
+    }
+    var desiredWidth = canvas.clientWidth * devicePixelRatio;
+    var desiredHeight = canvas.clientHeight * devicePixelRatio;
     // We call this each frame, so might as well update the 
     // rendering size of the canvas here as well.
-    if (w != canvas.clientWidth || h != canvas.clientHeight) {
-        w = canvas.clientWidth;
-        h = canvas.clientHeight;
+    if (w != desiredWidth || h != desiredHeight) {
+        w = desiredWidth;
+        h = desiredHeight;
         canvas.width = w;
         canvas.height = h;
         //console.log("updated canvas size to " + w + "x" + h);
@@ -2735,7 +2751,7 @@ var LibrarySDL = {
 
   SDL_RWFromFile: function(_name, mode) {
     var id = SDL.rwops.length; // TODO: recycle ids when they are null
-    var name = Pointer_stringify(_name)
+    var name = UTF8ToString(_name)
     SDL.rwops.push({ filename: name, mimetype: Browser.getMimetype(name) });
     return id;
   },
@@ -2763,7 +2779,7 @@ var LibrarySDL = {
 
   SDL_AddTimer: function(interval, callback, param) {
     return window.setTimeout(function() {
-      Runtime.dynCall('iii', callback, [interval, param]);
+      dynCall('iii', callback, [interval, param]);
     }, interval);
   },
   SDL_RemoveTimer: function(id) {

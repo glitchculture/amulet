@@ -17,46 +17,54 @@ struct option {
 static bool help_export() {
     printf(
        /*-------------------------------------------------------------------------------*/
-        "Usage: amulet export [-r] [-windows] [-mac] [-ios] [-iossim] [-linux] [-html] [ <dir> ]\n"
+        "Usage: amulet export [-windows] [-windows64] [-mac] [-linux] [-html] \n"
+        "                     [-ios-xcode-proj] [-android-studio-proj] [-datapak]\n"
+        "                     [-a] [-r] [-d <out-dir>] [-o <out-path>] [-nozipdir] [ <dir> ]\n"
         "\n"
-        "  Generates distribution packages for the project in <dir>,\n"
+        "  Exports distribution packages for the project in <dir>,\n"
         "  or the current directory if <dir> is omitted.\n"
-        "  <dir> should contain main.lua.\n"
+        "  <dir> should contain main.lua and conf.lua.\n"
         "\n"
-        "  If none of the -windows, -mac, -ios, -iossim -linux or -html options are given\n"
-        "  then packages for all supported platforms will be generated,\n"
-        "  otherwise only packages for the specified platforms will be generated.\n"
+        "  If no export platform is specified, then packages for windows,\n"
+        "  mac and linux will be generated.\n"
         "\n"
-        "  All files with the following extensions will be included:\n"
-        "  .lua .png .jpg .ogg .obj\n"
-        "  All .txt files will also be copied to the generated zip and\n"
-        "  be visible to the user when they open it.\n"
+        "  Unless the -a options is given, only files with the following\n"
+        "  extensions will be included: .lua .png .jpg .ogg .obj .json .frag .vert.\n"
+        "  All .txt files in <dir> will also be copied to the generated zip and\n"
+        "  be visible to the user when they extract it (this is meant for REAMDEs).\n"
         "\n"
         "  If the -r option is given then all subdirectories of <dir> are included\n"
         "  recursively, otherwise only the files in <dir> are included.\n"
         "\n"
-        "  If you create a conf.lua file in the same\n"
-        "  directory as main.lua containing the following:\n"
+        "  The -d option can be used to specify the directory to export the packages to.\n"
+        "  By default packages are exported to the current directory.\n"
+        "\n"
+        "  The -o option allows you to specify the complete path (dir + filename) of\n"
+        "  the generated package. In this case the -d option is ignored. The -o option\n"
+        "  doesn't work if you're exporting multiple platforms at once.\n"
+        "\n"
+        "  The -datapak option causes the platform agnostic data.pak file to be generated.\n"
+        "  This contains all your project's Lua source, images and other assets.\n"
+        "  You can use this to create your own custom distribution or update a previously\n"
+        "  generated distribution manually.\n"
+        "\n"
+        "  As a courtesy to the user, the generate zip packages will contain the game\n"
+        "  files in a sub-folder. If you instead want the game files to appear in the\n"
+        "  root of the zip, use -nozipdir. You might want this if the game will\n"
+        "  run from a launcher, such as Steam.\n"
+        "\n"
+        "  A minimal conf.lua might look something like this:\n"
         "\n"
         "    title = \"My Game Title\"\n"
         "    shortname = \"mygame\"\n"
         "    author = \"Your Name\"\n"
-        "    appid = \"com.some-unique-id.123\"\n"
         "    version = \"1.0.0\"\n"
         "\n"
-        "    display_name = \"My Game\"\n"
-        "    dev_region = \"en\"\n"
-        "    supported_languages = \"en,fr,nl,de,ja,zh-TW,zh-CN,ko\"\n"
-        "    icon = \"icon.png\"\n"
-        "    launch_image = \"launch.png\"\n"
-        "    orientation = \"any\"\n"
+        "  See the online docs for the full list of conf options.\n"
         "\n"
-        "  then this will be used for various bits of meta-data in the\n"
-        "  generated packages.\n"
-        "\n"
-        "  IMPORTANT: avoid unzipping and re-zipping the generated packages\n"
-        "  as you may inadvertently strip the executable bit from\n"
-        "  some files, which will cause them not to work.\n"
+        "  IMPORTANT: avoid unzipping and re-zipping the generated packages manually\n"
+        "  as you may inadvertently strip the executable bit from some files,\n"
+        "  causing them not to work on certain platforms.\n"
         "\n"
        /*-------------------------------------------------------------------------------*/
     );
@@ -68,7 +76,7 @@ static bool help_pack() {
        /*-------------------------------------------------------------------------------*/
         "Usage: amulet pack -png <filename.png> -lua <filename.lua> \n"
         "                   [-mono] [-minfilter <filter>] [-magfilter <filter>]\n"
-        "                   [-no-premult] [-keep-padding] <files> ...\n"
+        "                   [-no-premult] [-keep-padding] [-no-border] <files> ...\n"
         "\n"
         "  Packs images and/or fonts into a sprite sheet and generates a Lua\n"
         "  module for accessing the sprites therein.\n"
@@ -81,6 +89,7 @@ static bool help_pack() {
         "  -magfilter               nearest or linear (default is linear).\n"
         "  -no-premult              Do not pre-multiply RGB channels by alpha.\n"
         "  -keep-padding            Do not strip transparent pixels around images.\n"
+        "  -no-border               Do not add a transparent border around images.\n"
         "\n"
         "  <files> is a list of image files (.png or .jpg) and/or font files (.ttf).\n"
         "  Each font file must additionally have a suffix of the form @size which\n"
@@ -141,7 +150,7 @@ static bool help_cmd(int *argc, char ***argv) {
         "  help [ <command> ] Show help\n"
         "  version            Show version\n"
 #ifdef AM_EXPORT
-        "  export [ <dir> ]   Generate distribution packages\n"
+        "  export ...         Generate distribution packages\n"
 #endif
 #ifdef AM_SPRITEPACK
         "  pack ...           Generate sprite sheet from images and/or fonts\n"
@@ -159,32 +168,68 @@ static bool version_cmd(int *argc, char ***argv) {
 
 static bool export_cmd(int *argc, char ***argv) {
 #ifdef AM_EXPORT
-    uint32_t flags = 0;
+    am_export_flags flags;
     int n = *argc;
     int i;
     for (i = 0; i < n; i++) {
         char *arg = (*argv)[i];
         if (strcmp(arg, "-windows") == 0) {
-            flags |= AM_EXPORT_FLAG_WINDOWS;
+            flags.export_windows = true;
+        } else if (strcmp(arg, "-windows64") == 0) {
+            flags.export_windows64 = true;
         } else if (strcmp(arg, "-mac") == 0) {
-            flags |= AM_EXPORT_FLAG_OSX;
+            flags.export_mac = true;
+        } else if (strcmp(arg, "-mac-app-store") == 0) {
+            flags.export_mac_app_store = true;
         } else if (strcmp(arg, "-linux") == 0) {
-            flags |= AM_EXPORT_FLAG_LINUX;
-        } else if (strcmp(arg, "-ios") == 0) {
-            flags |= AM_EXPORT_FLAG_IOS;
-        } else if (strcmp(arg, "-iossim") == 0) {
-            flags |= AM_EXPORT_FLAG_IOSSIM;
+            flags.export_linux = true;
+        } else if (strcmp(arg, "-ios-xcode-proj") == 0) {
+            flags.export_ios_xcode_proj = true;
+        } else if (strcmp(arg, "-android-studio-proj") == 0) {
+            flags.export_android_studio_proj = true;
         } else if (strcmp(arg, "-html") == 0) {
-            flags |= AM_EXPORT_FLAG_HTML;
+            flags.export_html = true;
+        } else if (strcmp(arg, "-datapak") == 0) {
+            flags.export_data_pak = true;
         } else if (strcmp(arg, "-r") == 0) {
-            flags |= AM_EXPORT_FLAG_RECURSE;
+            flags.recurse = true;
+        } else if (strcmp(arg, "-a") == 0) {
+            flags.allfiles = true;
+        } else if (strcmp(arg, "-nozipdir") == 0) {
+            flags.zipdir = false;
+        } else if (strcmp(arg, "-d") == 0) {
+            if (i >= n - 1) {
+                fprintf(stderr, "Missing -d argument value.\n");
+                return false;
+            }
+            i++;
+            arg = (*argv)[i];
+            flags.outdir = arg;
+        } else if (strcmp(arg, "-o") == 0) {
+            if (i >= n - 1) {
+                fprintf(stderr, "Missing -o argument value.\n");
+                return false;
+            }
+            i++;
+            arg = (*argv)[i];
+            flags.outpath = arg;
+        } else if (strcmp(arg, "-debug") == 0) {
+            flags.debug = true;
         } else {
             break;
         }
     }
     *argc -= i;
     *argv += i;
-    if (flags == 0 || flags == AM_EXPORT_FLAG_RECURSE) flags |= AM_EXPORT_FLAG_WINDOWS | AM_EXPORT_FLAG_OSX | AM_EXPORT_FLAG_LINUX | AM_EXPORT_FLAG_IOS | AM_EXPORT_FLAG_HTML;
+    if (flags.num_platforms() == 0) {
+        flags.export_windows = true;
+        flags.export_mac = true;
+        flags.export_linux = true;
+    }
+    if (flags.outpath != NULL && flags.num_platforms() != 1) {
+        fprintf(stderr, "If the -o option is given, then exactly one export platform must be specified.\n");
+        return false;
+    }
     char *dir = (char*)".";
     if (*argc > 0) {
         dir = (*argv)[0];
@@ -192,7 +237,7 @@ static bool export_cmd(int *argc, char ***argv) {
     char last = dir[strlen(dir)-1];
     if (last == '/' || last == '\\') dir[strlen(dir)-1] = 0;
     am_opt_data_dir = dir;
-    return am_build_exports(flags);
+    return am_build_exports(&flags);
 #else
     fprintf(stderr, "Sorry, the export command is not supported on this platform.\n");
     return false;
@@ -235,6 +280,14 @@ static bool nocloselua_opt(int *argc, char ***argv) {
     return true;
 }
 
+static bool d3dangle_opt(int *argc, char ***argv) {
+    am_conf_d3dangle = true;
+    #if !defined(AM_WINDOWS)
+        am_conf_d3dangle = false;
+    #endif
+    return true;
+}
+
 static option options[] = {
     {"help",        help_cmd, true},
     {"-help",       help_cmd, true},
@@ -248,6 +301,7 @@ static option options[] = {
     {"-lang",       lang_opt, false},
     {"-gllog",      gllog_opt, false},
     {"-nocloselua", nocloselua_opt, false},
+    {"-d3dangle",   d3dangle_opt, false},
 
     {NULL, NULL}
 };
@@ -306,11 +360,11 @@ bool am_process_args(int *argc, char ***argv, int *exit_status) {
             am_opt_main_module = "main";
         } else if (!am_file_exists("data.pak")) {
             if (*argc > 0) {
-                fprintf(stderr, 
+                fprintf(stderr,
                     "'%s' is not a lua file and no main.lua found in the current directory.\n"
                     "Type 'amulet help' for usage information.\n", (*argv)[0]);
             } else {
-                fprintf(stderr, 
+                fprintf(stderr,
                     "No main.lua found in the current directory.\n"
                     "Type 'amulet help' for usage information.\n");
             }

@@ -4,6 +4,12 @@ struct t_face_component {
     int v;
     int t;
     int n;
+
+    t_face_component() {
+        v = 0;
+        t = 0;
+        n = 0;
+    }
 };
 
 typedef std::vector<t_face_component> t_face;
@@ -84,7 +90,7 @@ static float* read_obj(const char *filename, char *str, int len,
                 str++;
                 // face
                 t_face fa;
-                while (*str != '\n') {
+                while (*str != '\n' && *str != '\0') {
                     t_face_component fc;
                     fc.v = strtol(str, &str, 10);
                     if (*str == '/') {
@@ -104,7 +110,7 @@ static float* read_obj(const char *filename, char *str, int len,
                         }
                     }
                     fa.push_back(fc);
-                    while (*str == ' ') {
+                    while (*str != '\n' && *str != '\0' && *str != '/' && (*str < '0' || *str > '9')) {
                         str++;
                     }
                 }
@@ -112,7 +118,7 @@ static float* read_obj(const char *filename, char *str, int len,
                 break;
             }
             default: {
-                //am_log0("%s:%d: WARNING: unrecognised definition", filename, line);
+                //am_log0("%s:%d: WARNING: unrecognised charactor: %c", filename, line, *str);
                 break;
             }
         }
@@ -217,9 +223,7 @@ static int load_obj(lua_State *L) {
         free(errmsg);
         return lua_error(L);
     }
-    am_buffer *buf = am_new_userdata(L, am_buffer);
-    buf->data = data;
-    buf->size = size;
+    am_push_new_buffer_with_data(L, size, data);
     lua_pushinteger(L, stride);
     if (normals_offset >= 0) {
         lua_pushinteger(L, normals_offset);

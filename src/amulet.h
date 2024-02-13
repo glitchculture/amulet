@@ -13,6 +13,9 @@
 #if defined(AM_IOS32) || defined(AM_IOS64) || defined(AM_IOSSIM)
     #define AM_IOS
 #endif
+#if defined(AM_ANDROID_ARM32) || defined(AM_ANDROID_ARM64) || defined(AM_ANDROID_X86) || defined(AM_ANDROID_X86_64)
+    #define AM_ANDROID
+#endif
 #if defined(AM_WINDOWS) || defined(AM_OSX) || defined(AM_LINUX)
     #define AM_BACKEND_SDL
 #elif defined(AM_IOS)
@@ -25,9 +28,9 @@
 #else
     #error unsupported target
 #endif
-#if defined(AM_OSX) || defined(AM_LINUX)
+#if defined(AM_OSX) || defined(AM_LINUX) || defined(AM_WINDOWS)
     #define AM_GLPROFILE_DESKTOP 1
-#elif defined(AM_WINDOWS) || defined(AM_ANDROID) || defined(AM_IOS) || defined(AM_HTML)
+#elif defined(AM_ANDROID) || defined(AM_IOS) || defined(AM_HTML)
     #define AM_GLPROFILE_ES 1
 #else
     #error unsupported target
@@ -39,7 +42,7 @@
     #define AM_SPRITEPACK
 #endif
 
-#if defined(AM_GLPROFILE_ES) && defined(AM_WINDOWS) || defined(AM_LINUX)
+#if defined(AM_WINDOWS) || defined(AM_LINUX)
 #define AM_NEED_GL_FUNC_PTRS
 #endif
 
@@ -60,6 +63,7 @@
 #include <unistd.h>
 #endif
 
+#include <errno.h>
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -70,6 +74,7 @@
 #include <inttypes.h>
 #undef __STDC_LIMIT_MACROS
 #include <math.h>
+#include <time.h>
 
 // networking
 #if defined(AM_IOS) || defined(AM_OSX)
@@ -131,8 +136,11 @@ extern "C" {
 #include "am_lua_util.h"
 #include "am_math.h"
 #include "am_buffer.h"
+#include "am_mathv.h"
+#include "am_view.h"
 #include "am_image.h"
 #include "am_texture2d.h"
+#include "am_vbo.h"
 #include "am_audio.h"
 #include "am_action.h"
 #include "am_scene.h"
@@ -142,6 +150,7 @@ extern "C" {
 #include "am_program.h"
 #include "am_transforms.h"
 #include "am_depthbuffer.h"
+#include "am_stencilbuffer.h"
 #include "am_culling.h"
 #include "am_blending.h"
 #include "am_model.h"
@@ -157,6 +166,7 @@ extern "C" {
 #include "am_i18n.h"
 #include "am_net.h"
 #include "am_steamworks.h"
+#include "am_native.h"
 
 #undef near
 #undef far

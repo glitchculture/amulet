@@ -29,7 +29,8 @@ function am.quad_indices(n)
     end
 end
 
-function am.quads(capacity, spec)
+function am.quads(capacity, spec, usage)
+    usage = usage or "static"
     capacity = math.max(1, capacity)
     local n = 0
     local bindings
@@ -41,6 +42,7 @@ function am.quads(capacity, spec)
         attrs = {}
         views = {}
         for attr, view in pairs(bindings) do
+            view.buffer.usage = usage
             table.insert(attrs, attr)
             table.insert(views, view)
         end
@@ -105,6 +107,10 @@ function am.quads(capacity, spec)
     end
     function bind_node:get_num_quads()
         return n
+    end
+    function bind_node:clear()
+        n = 0
+        draw_node.count = 0
     end
     bind_node:tag"quads"
     return bind_node

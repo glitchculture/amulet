@@ -21,9 +21,15 @@ The `#` operator can be used to retrieve the size of a buffer in bytes.
 
 Fields:
 
+- `usage`: A hint to the graphics driver telling it how this buffer will be
+  used when it's used for vertex attribute data or element indices. 
+  Can be one of `"static"` (the data won't change often), `"dynamic"`
+  (the data will change frequenty), or `"stream"` (the data will only be
+  used a few times). The default is `"static"`.
+
 - `dataptr`: Returns a pointer to the buffer as a Lua `lightuserdata` value.
   The intended use for this is to manipulate the buffer using the
-  [LuaJIT FFI library](http://luajit.org/ext_ffi.html).
+  [LuaJIT FFI library](http://luajit.org/ext_ffi.html). Readonly.
 
 Methods:
 
@@ -121,12 +127,14 @@ Readonly.
 
 ## View methods
 
-### view:slice(n [, count]) {#view:slice .method-def}
+### view:slice(n [, count [, stride_multiplier]]) {#view:slice .method-def}
 
-Returns a new view of the same type as `view` that references the same buffer,
+Returns a new view with the same type as `view` that references the same buffer,
 but which starts at the `n`th element of `view` and continues for
-`count` elements. If `count` is omitted it is `#view - n + 1` (i.e.
-it covers all the elements of `view` after and including the `n`th).
+`count` elements. If `count` is omitted or nil it covers all the elements of
+`view` after and including the `n`th.
+`stride_multiplier` can be used to increase the stride of the view and thereby skip
+elements. It must be a positive integer and defaults to 1 (no skipping).
 
 ### view:set(val [, start [, count]]) {#view:set .method-def}
 

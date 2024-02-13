@@ -1,5 +1,7 @@
 -- extra table functions
 
+local debug = _G.debug
+
 function table.shallow_copy(t)
     if type(t) ~= "table" then
         error("table expected, but got a "..type(t), 2)
@@ -253,9 +255,18 @@ function format_vec(v)
     return str
 end
 
+local
+function default_concat(a,b)
+    return tostring(a)..tostring(b)
+end
+
 _metatable_registry.vec2.__tostring = format_vec
 _metatable_registry.vec3.__tostring = format_vec
 _metatable_registry.vec4.__tostring = format_vec
+
+_metatable_registry.vec2.__concat = default_concat
+_metatable_registry.vec3.__concat = default_concat
+_metatable_registry.vec4.__concat = default_concat
 
 local
 function format_mat(m)
@@ -291,12 +302,18 @@ _metatable_registry.mat2.__tostring = format_mat
 _metatable_registry.mat3.__tostring = format_mat
 _metatable_registry.mat4.__tostring = format_mat
 
+_metatable_registry.mat2.__concat = default_concat
+_metatable_registry.mat3.__concat = default_concat
+_metatable_registry.mat4.__concat = default_concat
+
 local
 function format_quat(q)
     return "quat("..q.angle..", "..tostring(q.axis)..")";
 end
 
 _metatable_registry.quat.__tostring = format_quat
+
+_metatable_registry.quat.__concat = default_concat
 
 -- extra builtins
 
@@ -331,24 +348,33 @@ function log(fmt, ...)
     local plat = am.platform
     if plat == "windows" or plat == "linux" or plat == "osx" then
         local f = io.open(am.app_data_dir.."log.txt", first_log and "w" or "a")
-        f:write(msg)
-        f:write("\n")
-        f:close()
+        if f then
+            f:write(msg)
+            f:write("\n")
+            f:close()
+        end
     end
     
     if am._main_window then
         local win = am._main_window
         if not log_overlay_node then
-            log_overlay_node = am.bind{P = math.ortho(0, win.pixel_width, 0, win.pixel_height)}
+            log_overlay_node = am.depth_test("always", false)
+                ^ am.bind{P = math.ortho(0, win.pixel_width, 0, win.pixel_height)}
                 ^ am.translate(0, win.pixel_height)
-                ^ am.text("", vec4(0, 1, 0, 1), "left", "top")
+                ^ {
+                    am.rect(0, 0, 0, 0, vec4(0, 0, 0, 0.5)),
+                    am.text("", vec4(0, 1, 0, 1), "left", "top")
+                }
             log_overlay_node:action(function(node)
                 if win:resized() then
                     node.P = math.ortho(0, win.pixel_width, 0, win.pixel_height)
                     node"translate".y = win.pixel_height
                 end
             end)
-            win._overlay = log_overlay_node
+            if not win._overlay then
+                win._overlay = am.group()
+            end
+            win._overlay:append(log_overlay_node)
             log_overlay_lines = {}
         end
         table.insert(log_overlay_lines, msg)
@@ -357,9 +383,16 @@ function log(fmt, ...)
         end
         local str = ""
         for i = 1, #log_overlay_lines do
-            str = str..log_overlay_lines[i].."\n"
+            str = str..log_overlay_lines[i]
+            if i < #log_overlay_lines then
+                str = str.."\n"
+            end
         end
-        log_overlay_node"text".text = str
+        local text_node = log_overlay_node"text"
+        text_node.text = str
+        local rect = log_overlay_node"rect"
+        rect.x2 = text_node.width
+        rect.y1 = -text_node.height
     end
 
     first_log = false

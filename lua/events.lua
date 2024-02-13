@@ -476,25 +476,22 @@ for i = 1, max_controllers do
     controllers[i] = {id = false}
 end
 
-function am._controller_attached(id)
-    --log("controller attached "..id)
-    for i, controller in ipairs(controllers) do
-        if not controller.id or controller.id == id then
-            controllers[i] = {
-                id = id,
-                just_attached = true,
-                left_x = 0,
-                left_y = 0,
-                right_x = 0,
-                right_y = 0,
-                lt = 0,
-                rt = 0,
-                button_state0 = {},
-                button_presses = {},
-                button_releases = {},
-            }
-            return
-        end
+function am._controller_attached(index, id)
+    --log("controller attached %d %d", index, id)
+    if index < max_controllers then
+        controllers[index + 1] = {
+            id = id,
+            just_attached = true,
+            left_x = 0,
+            left_y = 0,
+            right_x = 0,
+            right_y = 0,
+            lt = 0,
+            rt = 0,
+            button_state0 = {},
+            button_presses = {},
+            button_releases = {},
+        }
     end
 end
 
@@ -686,6 +683,16 @@ function am.controllers_detached()
     return res or empty_table
 end
 
+function am.rumble(index, duration, strengh) 
+    if am._rumble then
+        local controller = controllers[index]
+        if not controller or not controller.id then
+            return
+        end
+        am._rumble(controller.id, duration, strengh)
+    end
+end
+
 -- resize
 
 local
@@ -791,4 +798,22 @@ function am._init_window_event_data(window)
     if not am._main_window then
         am._main_window = window
     end
+end
+
+-- app focus
+function am._became_active()
+    am._did_just_become_active = true
+end
+
+am._register_pre_frame_func(function()
+    if am._did_just_become_active then
+        am._in_become_active_frame = true
+        am._did_just_become_active = false
+    else
+        am._in_become_active_frame = false
+    end
+end)
+
+function am.app_became_active()
+    return am._in_become_active_frame
 end

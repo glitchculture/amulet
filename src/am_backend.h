@@ -27,6 +27,7 @@ am_native_window *am_create_native_window(
     int msaa_samples);
 
 void am_get_native_window_size(am_native_window *window, int *pw, int *ph, int *sw, int *sh);
+void am_get_native_window_safe_area_margin(am_native_window *window, int *left, int *right, int *bottom, int *top);
 bool am_set_native_window_size_and_mode(am_native_window *window, int w, int h, am_window_mode mode);
 bool am_get_native_window_lock_pointer(am_native_window *window);
 void am_set_native_window_lock_pointer(am_native_window *window, bool lock);
@@ -53,8 +54,14 @@ char *am_get_data_path();
 
 const char *am_preferred_language();
 
-#if defined(AM_IOS)
+lua_State *am_get_global_lua_state();
+
+#if defined(AM_BACKEND_IOS)
 void am_open_ios_module(lua_State *L);
-#elif defined(AM_ANDROID)
+#elif defined(AM_BACKEND_ANDROID)
 void am_open_android_module(lua_State *L);
+#elif defined(AM_BACKEND_SDL)
+void am_open_sdl_module(lua_State *L);
 #endif
+
+char *am_open_file_dialog();
