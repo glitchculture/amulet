@@ -1,0 +1,137 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+        version:
+          description: 'Release version'
+          required: false
+          default: ''
+          type: string
+        release:
+          description: 'Create release?'
+          required: false
+          type: boolean
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  build_linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Install X11
+        run: sudo apt install libx11-dev libxext-dev
+      - name: Build linux64.release.lua51
+        run: make TARGET=linux64.release LUAVM=lua51
+      - name: Build linux64.release.lua52
+        run: make TARGET=linux64.release LUAVM=lua52
+      - name: Build linux64.release.luajit
+        run: make TARGET=linux64.release LUAVM=luajit
+      - name: Build android
+        run: ./scripts/github_build_android.sh
+      - name: Upload builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: amulet-builds-linux
+          path: builds
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+  build_macos:
+    runs-on: macos-13
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Build osx.release.lua51
+        run: make TARGET=osx.release     LUAVM=lua51
+      - name: Build osx.release.lua52
+        run: make TARGET=osx.release     LUAVM=lua52
+      - name: Build osx.release.luajit
+        run: make TARGET=osx.release     LUAVM=luajit
+      - name: Build ios.release.lua51
+        run: make TARGET=ios.release     LUAVM=lua51
+      - name: Build ios.release.lua52
+        run: make TARGET=ios.release     LUAVM=lua52
+      # emscripten build currently broken
+      # - name: Build html.release.lua51
+      #   run: ./scripts/github_build_emscripten.sh
+      - name: Upload builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: amulet-builds-macos
+          path: builds
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+  build_windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Setup MSYS
+        uses: msys2/setup-msys2@v2
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+      - run: uname
+      - name: Build msvc64.release.lua51
+        run: make TARGET=msvc64.release LUAVM=lua51
+      - name: Build msvc64.release.lua52
+        run: make TARGET=msvc64.release LUAVM=lua52
+      # luajit build on msvc64 currently broken
+      # - name: Build msvc64.release.luajit
+      #   run: make TARGET=msvc64.release LUAVM=luajit
+      - name: Upload builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: amulet-builds-windows
+          path: builds
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+  distros:
+    needs: [build_linux, build_macos, build_windows]
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TAG: ${{ inputs.version || github.ref_name }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # needed to generate changelog
+      - name: Mkdir builds
+        run: mkdir builds
+      - name: Download builds windows
+        uses: actions/download-artifact@v4
+        with:
+          name: amulet-builds-windows
+          merge-multiple: true
+          path: builds/
+      - name: Download builds macos
+        uses: actions/download-artifact@v4
+        with:
+          name: amulet-builds-macos
+          merge-multiple: true
+          path: builds/
+      - name: Download builds linux
+        uses: actions/download-artifact@v4
+        with:
+          name: amulet-builds-linux
+          merge-multiple: true
+          path: builds/
+      - name: Build distros
+        run: ./scripts/github_build_distros.sh
+      - name: Generate changelog
+        run: ./scripts/release_log.sh > changelog.txt
+      - name: Create release
+        if: ${{ github.ref_name || (inputs.release && inputs.version) }}
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: amulet-*.zip
+          draft: true
+          artifactErrorsFailBuild: true
+          bodyFile: changelog.txt
+          name: ${{ env.GITHUB_TAG }}
+          tag: ${{ env.GITHUB_TAG }}

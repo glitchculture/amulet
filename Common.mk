@@ -35,6 +35,10 @@ else ifneq (,$(findstring MSYS_NT,$(UNAME)))
   HOST_PLATFORM = msvc32
   IS_WINDOWS = yes
   PATH_SEP = ;
+else ifneq (,$(findstring MINGW64_NT,$(UNAME)))
+  HOST_PLATFORM = msvc64
+  IS_WINDOWS = yes
+  PATH_SEP = ;
 else ifneq (,$(findstring Linux,$(UNAME)))
   UNAME_A := $(shell uname -a)
   ifneq (,$(findstring x86_64,$(UNAME_A)))
@@ -374,7 +378,8 @@ else ifeq ($(TARGET_PLATFORM),msvc64)
   AR_OUT_OPT = -OUT:
   XCFLAGS = -MT -DLUA_COMPAT_ALL -WX 
   XLDFLAGS = -NODEFAULTLIB:msvcrt.lib \
-	$(BUILD_LIB_DIR)/SDL2.lib
+	$(BUILD_LIB_DIR)/SDL2.lib \
+  comdlg32.lib
   TARGET_CFLAGS = -nologo -EHsc -fp:fast
   WINDOWS = 1
   MSVC = 1
@@ -420,6 +425,7 @@ else ifeq ($(TARGET_PLATFORM),linux32)
   LUAJIT_FLAGS += CC="gcc -m32"
 else ifeq ($(TARGET_PLATFORM),linux64)
   LUA_CFLAGS += -DLUA_USE_POSIX -DLUA_USE_DLOPEN
+  LDFLAGS += -no-pie
 endif
 
 # Adjust flags for grade

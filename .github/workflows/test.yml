@@ -1,0 +1,19 @@
+name: WorkflowTest
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  build_linux:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TAG: ${{ inputs.version || github.ref_name }}
+    steps:
+      - name: Test
+        run: echo $GITHUB_TAG
